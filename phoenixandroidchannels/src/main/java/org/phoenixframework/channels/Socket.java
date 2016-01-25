@@ -160,7 +160,6 @@ public class Socket implements ISocket {
             @Override
             public void onCompleted(Exception ex, com.koushikdutta.async.http.WebSocket webSocket) {
                 if (ex != null) {
-                    ex.printStackTrace();
                     return;
                 }
                 LOG.log(Level.FINE, "WebSocket onOpen: {0}", webSocket);
@@ -216,7 +215,7 @@ public class Socket implements ISocket {
                     @Override
                     public void onCompleted(Exception ex) {
                         //ex.printStackTrace();
-                        LOG.log(Level.FINE, "WebSocket onClose {0}/{1}", new Object[]{ex.getMessage(), ex.getLocalizedMessage()});
+                        LOG.log(Level.FINE, "WebSocket onClose ");
                         Socket.this.webSocket = null;
                         scheduleReconnectTimer();
                         for (final ISocketCloseCallback callback : socketCloseCallbacks) {
