@@ -14,6 +14,7 @@ import com.koushikdutta.async.http.WebSocket;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
@@ -31,6 +32,7 @@ public class Socket implements ISocket {
     private static final Logger LOG = Logger.getLogger(Socket.class.getName());
 
     public static final int RECONNECT_INTERVAL_MS = 5000;
+    private static final String TAG = "Socket";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -38,91 +40,21 @@ public class Socket implements ISocket {
     private com.koushikdutta.async.http.WebSocket webSocket = null;
 
     private String endpointUri = null;
-    private final List<Channel> channels = new ArrayList<>();
+    private final HashMap<String, Channel> channels = new HashMap<>();
 
     private Timer timer = null;
     private TimerTask reconnectTimerTask = null;
 
-    private Set<ISocketOpenCallback> socketOpenCallbacks = Collections.newSetFromMap(new WeakHashMap<ISocketOpenCallback, Boolean>());
+    private List<ISocketOpenCallback> socketOpenCallbacks = new ArrayList<>();
     private Set<ISocketCloseCallback> socketCloseCallbacks = Collections.newSetFromMap(new WeakHashMap<ISocketCloseCallback, Boolean>());
     private Set<IErrorCallback> errorCallbacks = Collections.newSetFromMap(new WeakHashMap<IErrorCallback, Boolean>());
-    private Set<IMessageCallback> messageCallbacks = Collections.newSetFromMap(new WeakHashMap<IMessageCallback, Boolean>());
+    private List<IMessageCallback> messageCallbacks = new ArrayList<>();// Collections.newSetFromMap(new WeakHashMap<IMessageCallback, Boolean>());
 
     private int refNo = 1;
 
     /**
      * Annotated WS Endpoint. Private member to prevent confusion with "onConn*" registration methods.
      */
-
-    private AsyncHttpClient.WebSocketConnectCallback wsCallback =new AsyncHttpClient.WebSocketConnectCallback(){
-        @Override
-        public void onCompleted(Exception ex, com.koushikdutta.async.http.WebSocket webSocket) {
-            if (ex != null) {
-                ex.printStackTrace();
-                return;
-            }
-            LOG.log(Level.FINE, "WebSocket onOpen: {0}", webSocket);
-            cancelReconnectTimer();
-
-            // TODO - Heartbeat
-            for (final ISocketOpenCallback callback : socketOpenCallbacks) {
-                callback.onOpen();
-            }
-
-            Socket.this.webSocket = webSocket;
-            Socket.this.flushSendBuffer();
-
-            webSocket.setStringCallback(new WebSocket.StringCallback() {
-                @Override
-                public void onStringAvailable(String payload) {
-                    LOG.log(Level.FINE, "Envelope received: {0}", payload);
-                    Log.d("TAG", payload);
-                    try {
-                            final Envelope envelope = objectMapper.readValue(payload, Envelope.class);
-                            if(channels!=null) {
-                                for (final Channel channel : channels) {
-                                    if (channel.isMember(envelope.getTopic())) {
-                                        channel.trigger(envelope.getEvent(), envelope);
-                                    }
-                                }
-                            }
-                            for (final IMessageCallback callback : messageCallbacks) {
-                                callback.onMessage(envelope);
-                            }
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                        LOG.log(Level.SEVERE, "Failed to read message payload", e);
-                    } finally {
-
-                    }
-                }
-            });
-
-            webSocket.setEndCallback(new CompletedCallback() {
-                @Override
-                public void onCompleted(Exception ex) {
-//                    LOG.log(Level.FINE, "WebSocket onClose {0}/{1}", new Object[]{ex.getMessage(), ex.getLocalizedMessage()});
-//                    Socket.this.webSocket = null;
-//                    scheduleReconnectTimer();
-//                    for (final ISocketCloseCallback callback : socketCloseCallbacks) {
-//                        callback.onClose();
-//                    }
-                }
-            });
-            webSocket.setClosedCallback(new CompletedCallback() {
-                @Override
-                public void onCompleted(Exception ex) {
-                    ex.printStackTrace();
-                    LOG.log(Level.FINE, "WebSocket onClose {0}/{1}", new Object[]{ex.getMessage(), ex.getLocalizedMessage()});
-                    Socket.this.webSocket = null;
-                    scheduleReconnectTimer();
-                    for (final ISocketCloseCallback callback : socketCloseCallbacks) {
-                        callback.onClose();
-                    }
-                }
-            });
-        }
-    };
 
     public Socket(final String endpointUri) throws IOException {
         LOG.log(Level.FINE, "PhoenixSocket({0})", endpointUri);
@@ -176,13 +108,12 @@ public class Socket implements ISocket {
                 webSocket.setStringCallback(new WebSocket.StringCallback() {
                     @Override
                     public void onStringAvailable(String payload) {
-                        Log.d("TAG", payload);
                         LOG.log(Level.FINE, "Envelope received: {0}", payload);
-                        Log.d("TAG", payload);
                         try {
                             final Envelope envelope = objectMapper.readValue(payload, Envelope.class);
+                            Log.d(TAG, "All channels: "+channels.size());
                             if(channels!=null) {
-                                for (final Channel channel : channels) {
+                                for (final Channel channel : channels.values()) {
                                     if (channel.isMember(envelope.getTopic())) {
                                         channel.trigger(envelope.getEvent(), envelope);
                                     }
@@ -191,7 +122,7 @@ public class Socket implements ISocket {
                             for (final IMessageCallback callback : messageCallbacks) {
                                 callback.onMessage(envelope);
                             }
-                        } catch (IOException e) {
+                        } catch (Exception e) {
                             e.printStackTrace();
                             LOG.log(Level.SEVERE, "Failed to read message payload", e);
                         } finally {
@@ -203,12 +134,13 @@ public class Socket implements ISocket {
                 webSocket.setEndCallback(new CompletedCallback() {
                     @Override
                     public void onCompleted(Exception ex) {
-//                    LOG.log(Level.FINE, "WebSocket onClose {0}/{1}", new Object[]{ex.getMessage(), ex.getLocalizedMessage()});
-//                    Socket.this.webSocket = null;
-//                    scheduleReconnectTimer();
-//                    for (final ISocketCloseCallback callback : socketCloseCallbacks) {
-//                        callback.onClose();
-//                    }
+                        LOG.log(Level.FINE, "WebSocket onClose ");
+                        Socket.this.webSocket = null;
+                        scheduleReconnectTimer();
+                        for (ISocketCloseCallback callback : socketCloseCallbacks) {
+                            callback.onClose();
+                        }
+
                     }
                 });
                 webSocket.setClosedCallback(new CompletedCallback() {
@@ -218,7 +150,7 @@ public class Socket implements ISocket {
                         LOG.log(Level.FINE, "WebSocket onClose ");
                         Socket.this.webSocket = null;
                         scheduleReconnectTimer();
-                        for (final ISocketCloseCallback callback : socketCloseCallbacks) {
+                        for ( ISocketCloseCallback callback : socketCloseCallbacks) {
                             callback.onClose();
                         }
                     }
@@ -237,8 +169,9 @@ public class Socket implements ISocket {
     public Channel chan(String topic, JsonNode payload) {
         LOG.log(Level.FINE, "chan: {0}, {1}", new Object[]{topic, payload});
         final Channel channel = new Channel(topic, payload, Socket.this);
+
         synchronized (channels) {
-            channels.add(channel);
+            channels.put(channel.getTopic(), channel);
         }
         return channel;
     }
@@ -246,7 +179,7 @@ public class Socket implements ISocket {
     @Override
     public void remove(Channel channel) {
         synchronized (channels) {
-            for (final Iterator chanIter = channels.iterator(); chanIter.hasNext(); ) {
+            for (final Iterator chanIter = channels.values().iterator(); chanIter.hasNext(); ) {
                 if (chanIter.next() == channel) {
                     chanIter.remove();
                     break;
@@ -275,6 +208,7 @@ public class Socket implements ISocket {
         if (this.isConnected()) {
 
             try {
+                Log.d(TAG, "Sending: "+json);
                 webSocket.send(json);
             } catch(Exception e) {
                 Log.d("TAG", "Error: "+e.getMessage());

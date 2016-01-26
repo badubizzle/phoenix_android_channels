@@ -1,8 +1,14 @@
 package com.thirdred.phoenixandroidexample;
 
+import android.os.Handler;
+import android.os.Looper;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -23,17 +29,50 @@ public class MainActivity extends AppCompatActivity {
 
     private ISocket socket;
     private Channel channel;
+    EditText messageText;
+    Button sendButton;
+    TextView textView;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        sendButton = (Button) findViewById(R.id.send);
+        textView= (TextView) findViewById(R.id.text);
+        messageText = (EditText) findViewById(R.id.message);
+        sendButton.setEnabled(false);
+        messageText.setEnabled(false);
+        textView.setText("Connecting...");
+        sendButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+
+                if(messageText.getText().toString().trim().length()>0) {
+                    String msg = messageText.getText().toString();
+                    messageText.setText("");
+                    ObjectNode node = new ObjectNode(JsonNodeFactory.instance)
+                            .put("user", "bizzle")
+                            .put("body", msg)
+                            .put("ref", socket.makeRef());
+
+                    try {
+                        //Log.d("TAG","Sending message to socket");
+                        channel.push("new:msg", node);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+
+                }
+            }
+        });
+
         try {
             startWs();
         } catch (IOException e) {
             e.printStackTrace();
         }
     }
+
 
     private void startWs() throws IOException {
 
@@ -49,7 +88,15 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onOpen() {
                 try {
-                    Log.d("TAG","Socket opened");
+                    Log.d("TAG", "Socket opened");
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            textView.setText(textView.getText() + "\n" + "Connected!");
+                            sendButton.setEnabled(true);
+                            messageText.setEnabled(true);
+                        }
+                    });
                     joinChannel();
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -59,7 +106,22 @@ public class MainActivity extends AppCompatActivity {
         socket.onClose(new ISocketCloseCallback() {
             @Override
             public void onClose() {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        textView.setText(textView.getText() + "\n" + "Closed!");
+                        sendButton.setEnabled(false);
+                        messageText.setEnabled(false);
+                    }
+                });
                 Log.d("TAG", "Socket closed");
+
+            }
+        });
+        socket.onMessage(new IMessageCallback() {
+            @Override
+            public void onMessage(Envelope envelope) {
+                Log.d("TAG", "Received: "+envelope.toString());
             }
         });
         socket.connect();
@@ -88,15 +150,34 @@ public class MainActivity extends AppCompatActivity {
                 .receive("ok", new IMessageCallback() {
                     @Override
                     public void onMessage(Envelope envelope) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                textView.setText(textView.getText().toString() + "\n" + "Joined rooms:lobby!");
+                            }
+                        });
                         System.out.println("JOINED with " + envelope.toString());
-                        sendMessage();
+                        //sendMessage();
                     }
                 });
 
         channel.on("new:msg", new IMessageCallback() {
             @Override
             public void onMessage(Envelope envelope) {
+                showMessage(envelope);
                 System.out.println("NEW MESSAGE: " + envelope.toString());
+            }
+        });
+        channel.on("new:message", new IMessageCallback() {
+            @Override
+            public void onMessage(Envelope envelope) {
+                showMessage(envelope);
+            }
+        });
+        channel.on("shout", new IMessageCallback() {
+            @Override
+            public void onMessage(Envelope envelope) {
+                showMessage(envelope);
             }
         });
 
@@ -110,22 +191,24 @@ public class MainActivity extends AppCompatActivity {
         channel.onError(new IErrorCallback() {
             @Override
             public void onError(String reason) {
-                Log.d("TAG", "Error: "+reason);
+                Log.d("TAG", "Error: " + reason);
                 System.out.println("ERROR: " + reason);
             }
         });
     }
 
-    private void sendMessage() {
-        ObjectNode node = new ObjectNode(JsonNodeFactory.instance)
-                .put("user", "my_username")
-                .put("body", "Hello World");
-
-        try {
-            Log.d("TAG","Sending message to socket");
-            channel.push("new:msg", node);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+    private void showMessage(final Envelope envelope) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                addMessage("\nReceived: "+envelope.toString());
+            }
+        });
     }
+
+    void addMessage(String text){
+        textView.setText(textView.getText().toString()+ text);//"\nReceived: "+envelope.toString());
+    }
+
+
 }
